@@ -16,6 +16,16 @@ int main(int argc, char **argv)
     struct options_t opts;
     get_opts(argc, argv, &opts);
 
+    /***************************
+     * struct options_t {
+     * char *in_file;
+     * char *out_file;
+     * int n_threads;
+     * int n_loops;
+     * bool spin;
+     * };
+    */
+
     bool sequential = false;
     if (opts.n_threads == 0) {
         opts.n_threads = 1;
@@ -51,10 +61,14 @@ int main(int argc, char **argv)
         }
     }
     else {
-        //start_threads(threads, opts.n_threads, ps_args, <your function>);
+        pthread_barrier_t barrier;
+        pthread_barrier_init(&barrier, NULL, opts.n_threads);
 
+        start_threads(threads, opts.n_threads, ps_args, compute_prefix_sum);
         // Wait for threads to finish
         join_threads(threads, opts.n_threads);
+
+        pthread_barrier_destroy(&barrier);
     }
 
     //End timer and print out elapsed
