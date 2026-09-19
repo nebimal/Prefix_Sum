@@ -1,6 +1,9 @@
 #include "prefix_sum.h"
 #include "helpers.h"
 
+extern pthread_barrier_t barrier;
+// Barrier initialized in main.
+
 void* compute_prefix_sum(void *a)
 {
 
@@ -11,13 +14,6 @@ void* compute_prefix_sum(void *a)
     ***********************************************************************************************************/
 
     prefix_sum_args_t *args = (prefix_sum_args_t *)a; 
-
-
-    // A barrier is needed so multiple threads dont try to do assignments that has not been updated.
-    // Use pthread barrier.
-
-    // in order for threads to know what indices they need to work on, we need to have the threads have a specific
-    // length, with all the work divided equally.
 
     /*********************************************************************************
      * This will be the array that we need to do the prefix sum on.
@@ -32,41 +28,56 @@ void* compute_prefix_sum(void *a)
     int length_per_thread = length/num_threads;         // The work get divided equally among the threads.
     int start = id * length_per_thread;                 // Where the thread should start index of the array.
 
+    int end = (id == num_threads - 1) ? length : start + length_per_thread;
+    // This is for the last thread so if there are anymore elements we missed then the last thread will take the the rest.
 
-    output_values[start] = input_values[start]; 
-    // inputArray { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
-    // Thread 3
-    // length of array = 12
-    // Length per thread = 4
-    // For thread = 0; start = 0;
-    // OutputArray[start] = input_array[start] (I think)
-    // outputArray[1] = inputArray[0] + inputArray[1]; // i = 0, 1 + 2
-    // i++
-    // inputArray { 1, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12} // i = 1,
-    // outputArray[2] = inputArray[1] + inputArray[2];
-    // inputArray { 1, 3, 6, 4, 5, 6, 7, 8, 9, 10, 11, 12} i = 1
-    // ...  
-    // outputArray[3] = inputArray[2] + inputArray[3]; 
-    // inputArray { 1, 3, 6, 10, 5, 6, 7, 8, 9, 10, 11, 12} i = 2
-    // Now that the thread reaches it's length, jump to the next thread.
-    // thread = 1; start = 4.
-    // outputArray[4] = inputArray[4] (Outside of for loop I believe)
-    // for(...)
-    // outputArray[5] = inputArray[4] + inputArray[5]];
-    // inputArray { 1, 3, 6, 10, 5, 11, 18, 26, 9, 10, 11, 12}
-    // thread = 2
-    // inputArray { 1, 3, 6, 10, 5, 11, 18, 26, 9, 19, 30, 42}
-
-    for (int i = start; i < start + length_per_thread; i++)
-    {   
-        output_values[i+1] = args->op(input_values[i+1], output_values[i], args->n_loops);    
+    // Does the prefix sum for each thread ONLY in the chunk they have.
+    if (start < end)
+    {
+        output_values[start] = input_values[start];
+        for (int i = start + 1; i < end; i++)
+        {   
+            output_values[i] = args->op(output_values[i - 1], input_values[i], args->n_loops);
+        }
     }
-    // We need to make sure to lock the thread so only 1 thread at a time, I want the thread to be in order, 0 then 1 then 2.
-    // Also dont forget on the last element of each thread we need to add it to all the remaining element after it.
-    /*********************************************************
-     * Now we begin at for loop, and we will loop until n/2, 
-     * and increment stride by shifting bitwise operator.
-    **********************************************************/
+    // Make sure all threads wait here until all the threads have completed the part above.
+    // If we don't wait, then one thread can get ahead while another is still computing the first part and add the incorrect values to the final result.
+    pthread_barrier_wait(&barrier);
+
+    if (id == 0) // Only thread 0 will compute this, after all thread chunk values have been finalized.
+    {
+        for (int j = 1; j < num_threads; j++) // J represting the threads.
+        {
+            int chunk_Start = j * length_per_thread;
+            // The index the chunk of that thread starts at.
+
+            int chunk_End = (j == num_threads - 1) ? length : chunk_Start + length_per_thread;
+
+            // Gets the value from the previous thread last index.
+            int offset = output_values[chunk_Start - 1];
+
+            // For this for loop, it will add the value of the last index from the previous thread to each value of the current thread.
+            // [0, 1, 3, 3, 7, 12, 6, 11, 19] 
+            // For 3 Threads.
+            // Thread 0 start = index[0] ends = index[2]
+            // Thread 1 start = index[3] ends = index[5]
+            // Thread 2 start = index[6] ends = index[8]
+            // With this for loop, the first thread would be the 2nd one (thread 1), instead of thread 0.
+            // thread 0 last index(2) with value (3) will get added to all the values to the chunk in thread 1.
+            // [0, 1, 3, 6, 10, 15, 6, 11, 19]
+            // then the 3rd thread (thread 2), will then get the last index of the last thread 1
+            // thread 1 last index(5) with NEW value (15), then that gets added to all the chunks in threads 2.
+            // // [0, 1, 3, 6, 10, 15, 21, 28, 36]
+            for (int k = chunk_Start; k < chunk_End; k++)
+            {
+                output_values[k] = args->op(offset, output_values[k], args->n_loops);
+            }
+            // This is currently O(n^2), correct output tho but fix this and make the 2nd part run o(n).
+        }
+    }
+
+    pthread_barrier_wait(&barrier);
+    // This makes all the other threads wait for thread 0 to complete, ensuring correct results.
 
     return 0;
 }

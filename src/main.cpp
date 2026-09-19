@@ -10,6 +10,9 @@
 
 using namespace std;
 
+// Global variable because we need to initalize and destroy in main but we wait inside the prefix_sum function.
+pthread_barrier_t barrier;
+
 int main(int argc, char **argv)
 {
     // Parse args
@@ -61,9 +64,7 @@ int main(int argc, char **argv)
         }
     }
     else {
-        pthread_barrier_t barrier;
         pthread_barrier_init(&barrier, NULL, opts.n_threads);
-
         start_threads(threads, opts.n_threads, ps_args, compute_prefix_sum);
         // Wait for threads to finish
         join_threads(threads, opts.n_threads);
