@@ -12,6 +12,7 @@ using namespace std;
 
 // Global variable because we need to initalize and destroy in main but we wait inside the prefix_sum function.
 pthread_barrier_t barrier;
+spin_barrier *spinBarrier = nullptr;
 
 int main(int argc, char **argv)
 {
@@ -52,6 +53,21 @@ int main(int argc, char **argv)
     fill_args(ps_args, opts.n_threads, n_vals, input_vals, output_vals,
         opts.spin, scan_operator, opts.n_loops);
 
+    // Initialize the appropriate barrier
+    if (!sequential) {
+        if (opts.spin) {
+            // Use our custom spin barrier
+            spinBarrier = new spin_barrier(opts.n_threads);
+        } else {
+            // Use pthread barrier
+            pthread_barrier_init(
+                &barrier,
+                NULL,
+                opts.n_threads
+            );
+        }
+    }
+
     // Start timer
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -64,18 +80,29 @@ int main(int argc, char **argv)
         }
     }
     else {
-        pthread_barrier_init(&barrier, NULL, opts.n_threads);
+        // pthread_barrier_init(&barrier, NULL, opts.n_threads);
         start_threads(threads, opts.n_threads, ps_args, compute_prefix_sum);
         // Wait for threads to finish
         join_threads(threads, opts.n_threads);
 
-        pthread_barrier_destroy(&barrier);
+        // pthread_barrier_destroy(&barrier);
     }
 
     //End timer and print out elapsed
     auto end = std::chrono::high_resolution_clock::now();
     auto diff = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << "time: " << diff.count() << std::endl;
+
+    // Destroy the appropriate barrier
+    if (!sequential) {
+        if (opts.spin) {
+            delete spinBarrier;
+            spinBarrier = nullptr;
+        } else {
+            pthread_barrier_destroy(&barrier);
+        }
+    }
+     
 
     // Write output data
     write_file(&opts, &(ps_args[0]));

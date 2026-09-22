@@ -4,6 +4,18 @@
 extern pthread_barrier_t barrier;
 // Barrier initialized in main.
 
+extern spin_barrier *spinBarrier;
+
+static void barrier_wait(int tid, bool spin)
+{
+    if (spin) {
+        spinBarrier->wait(tid);
+    } else {
+        pthread_barrier_wait(&barrier);
+    }
+}
+    
+
 void* compute_prefix_sum(void *a)
 {
 
@@ -42,7 +54,8 @@ void* compute_prefix_sum(void *a)
     }
     // Make sure all threads wait here until all the threads have completed the part above.
     // If we don't wait, then one thread can get ahead while another is still computing the first part and add the incorrect values to the final result.
-    pthread_barrier_wait(&barrier);
+    //pthread_barrier_wait(&barrier);
+    barrier_wait(id, args->spin);
 
     if (id == 0) // Only thread 0 will compute this, after all thread chunk values have been finalized.
     {
@@ -52,16 +65,14 @@ void* compute_prefix_sum(void *a)
             int prev_Chunk_End = j * length_per_thread - 1;
             int chunk_End = (j == num_threads - 1) ? length - 1 : (j + 1) * length_per_thread - 1;
 
-            // Gets the value from the previous thread last index.
-            int offset = output_values[prev_Chunk_End];
-
-            output_values[chunk_End] = args->op(offset, output_values[chunk_End], args->n_loops);
+            output_values[chunk_End] = args->op(output_values[prev_Chunk_End], output_values[chunk_End], args->n_loops);
             
         }
     }
 
-    pthread_barrier_wait(&barrier);
-    
+    // pthread_barrier_wait(&barrier);
+    barrier_wait(id, args->spin);
+
     // This is for every thread besides 0.
     if (id > 0 && start < end)
     {
@@ -75,7 +86,8 @@ void* compute_prefix_sum(void *a)
 
     }
 
-    pthread_barrier_wait(&barrier);
+    // pthread_barrier_wait(&barrier);
+    barrier_wait(id, args->spin);
     // All threads must wait for all threads to finish before returning.
 
     return NULL;
